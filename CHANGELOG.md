@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.1.0] - Fecha: 2024-03-08
+## [1.1.0] - Fecha: 2025-03-08
 
 ### Restructuración del Framework
 
@@ -43,7 +43,7 @@
 
 ---
 
-## [1.0.1] - Fecha: 2023-XX-XX
+## [1.0.1] - Fecha: 2025-03-08
 
 ### Correcciones de Errores
 
