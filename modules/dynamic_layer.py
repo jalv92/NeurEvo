@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from typing import Tuple, List, Optional, Union, Callable
+from typing import Tuple, List, Optional, Union, Callable, Any
 
 class DynamicLayer(nn.Module):
     """
@@ -42,6 +42,9 @@ class DynamicLayer(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Sistema de notificación de cambios dimensionales
+        self.dimension_listeners = []
         
         # Inicializar pesos y sesgo
         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
@@ -99,6 +102,22 @@ class DynamicLayer(nn.Module):
         # Historial de activaciones para adaptación
         self.register_buffer('activation_history', torch.zeros(out_features))
         self.register_buffer('importance_score', torch.ones(out_features))
+    
+    def register_dimension_listener(self, listener: Callable[[int, int], Any]) -> None:
+        """
+        Registra una función callback que será llamada cuando cambien las dimensiones.
+        
+        Args:
+            listener: Función que recibirá (in_features, out_features) cuando cambien
+        """
+        self.dimension_listeners.append(listener)
+    
+    def notify_dimension_change(self) -> None:
+        """
+        Notifica a todos los listeners registrados que ha habido un cambio en las dimensiones.
+        """
+        for listener in self.dimension_listeners:
+            listener(self.in_features, self.out_features)
     
     def reset_parameters(self):
         """
@@ -169,6 +188,8 @@ class DynamicLayer(nn.Module):
         Args:
             threshold: Umbral para podar conexiones
         """
+        old_out_features = self.out_features
+        
         with torch.no_grad():
             # Calcular importancia de cada conexión
             importance = torch.abs(self.weight)
@@ -202,6 +223,10 @@ class DynamicLayer(nn.Module):
                         lateral_mask[i, max_idx] = True
                 
                 self.lateral_mask.data.copy_(lateral_mask.float())
+                
+        # Si las dimensiones han cambiado, notificar a los listeners
+        if self.out_features != old_out_features:
+            self.notify_dimension_change()
     
     def grow_connections(self, rate: float = 0.05):
         """
@@ -223,6 +248,116 @@ class DynamicLayer(nn.Module):
             
             # Inicializar nuevas conexiones con valores pequeños
             self.weight.data[to_grow] = torch.randn_like(self.weight.data[to_grow]) * 0.01
+            
+        # Notificar a los listeners del cambio
+        self.notify_dimension_change()
+    
+    def update_input_size(self, new_in_features: int) -> None:
+        """
+        Actualiza el tamaño de entrada de la capa, redimensionando los pesos.
+        
+        Args:
+            new_in_features: Nuevo número de características de entrada
+        """
+        if new_in_features == self.in_features:
+            return
+            
+        with torch.no_grad():
+            old_weights = self.weight.data
+            self.in_features = new_in_features
+            
+            # Crear nuevo tensor de pesos con el tamaño actualizado
+            new_weight = torch.Tensor(self.out_features, new_in_features).to(self.device)
+            
+            # Inicializar nuevos pesos
+            nn.init.kaiming_uniform_(new_weight, a=math.sqrt(5))
+            
+            # Copiar los pesos antiguos en las posiciones correspondientes
+            min_features = min(old_weights.shape[1], new_in_features)
+            new_weight[:, :min_features] = old_weights[:, :min_features]
+            
+            # Actualizar parámetro de peso
+            self.weight = nn.Parameter(new_weight)
+            
+            # Actualizar máscara de conectividad
+            self.register_buffer('connectivity_mask', torch.ones_like(self.weight))
+            if self.sparsity > 0:
+                mask = torch.rand_like(self.weight) > self.sparsity
+                self.connectivity_mask.data.copy_(mask.float())
+                
+        # Notificar a los listeners del cambio
+        self.notify_dimension_change()
+    
+    def update_output_size(self, new_out_features: int) -> None:
+        """
+        Actualiza el tamaño de salida de la capa, redimensionando los pesos.
+        
+        Args:
+            new_out_features: Nuevo número de características de salida
+        """
+        if new_out_features == self.out_features:
+            return
+            
+        with torch.no_grad():
+            old_weights = self.weight.data
+            old_out_features = self.out_features
+            self.out_features = new_out_features
+            
+            # Crear nuevo tensor de pesos con el tamaño actualizado
+            new_weight = torch.Tensor(new_out_features, self.in_features).to(self.device)
+            
+            # Inicializar nuevos pesos
+            nn.init.kaiming_uniform_(new_weight, a=math.sqrt(5))
+            
+            # Copiar los pesos antiguos en las posiciones correspondientes
+            min_features = min(old_weights.shape[0], new_out_features)
+            new_weight[:min_features, :] = old_weights[:min_features, :]
+            
+            # Actualizar parámetro de peso
+            self.weight = nn.Parameter(new_weight)
+            
+            # Actualizar sesgo si existe
+            if self.has_bias:
+                old_bias = self.bias.data
+                new_bias = torch.Tensor(new_out_features).to(self.device)
+                fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+                bound = 1 / math.sqrt(fan_in)
+                nn.init.uniform_(new_bias, -bound, bound)
+                min_bias = min(old_bias.shape[0], new_out_features)
+                new_bias[:min_bias] = old_bias[:min_bias]
+                self.bias = nn.Parameter(new_bias)
+            
+            # Actualizar máscara de conectividad
+            self.register_buffer('connectivity_mask', torch.ones_like(self.weight))
+            if self.sparsity > 0:
+                mask = torch.rand_like(self.weight) > self.sparsity
+                self.connectivity_mask.data.copy_(mask.float())
+                
+            # Actualizar historial de activaciones
+            new_activation_history = torch.zeros(new_out_features).to(self.device)
+            new_importance_score = torch.ones(new_out_features).to(self.device)
+            min_size = min(self.activation_history.shape[0], new_out_features)
+            new_activation_history[:min_size] = self.activation_history[:min_size]
+            new_importance_score[:min_size] = self.importance_score[:min_size]
+            self.register_buffer('activation_history', new_activation_history)
+            self.register_buffer('importance_score', new_importance_score)
+            
+            # Actualizar conexiones laterales si existen
+            if self.lateral_connections:
+                old_lateral = self.lateral_weight.data
+                new_lateral = torch.Tensor(new_out_features, new_out_features).to(self.device)
+                nn.init.normal_(new_lateral, mean=0.0, std=0.01)
+                min_lateral = min(old_lateral.shape[0], new_out_features)
+                new_lateral[:min_lateral, :min_lateral] = old_lateral[:min_lateral, :min_lateral]
+                self.lateral_weight = nn.Parameter(new_lateral)
+                self.register_buffer('lateral_mask', torch.ones_like(self.lateral_weight))
+            
+            # Actualizar BatchNorm si se usa
+            if self.use_batch_norm:
+                self.batch_norm = nn.BatchNorm1d(new_out_features)
+                
+        # Notificar a los listeners del cambio
+        self.notify_dimension_change()
     
     def extra_repr(self) -> str:
         """

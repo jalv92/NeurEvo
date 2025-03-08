@@ -218,47 +218,121 @@ class NeurEvoAgent:
         Returns:
             Pérdida del paso de entrenamiento
         """
-        # Muestrear lote de experiencias
-        states, actions, rewards, next_states, dones = self.memory.sample(self.batch_size)
+        try:
+            # Muestrear lote de experiencias
+            states, actions, rewards, next_states, dones = self.memory.sample(self.batch_size)
+            
+            # Convertir a tensores
+            states = torch.FloatTensor(states).to(self.device)
+            actions = torch.LongTensor(actions).to(self.device)
+            rewards = torch.FloatTensor(rewards).to(self.device)
+            next_states = torch.FloatTensor(next_states).to(self.device)
+            dones = torch.FloatTensor(dones).to(self.device)
+            
+            # Verificar dimensiones antes de procesar
+            batch_size = states.shape[0]
+            if batch_size != self.batch_size:
+                print(f"Advertencia: Tamaño de lote inconsistente. Esperado: {self.batch_size}, Actual: {batch_size}")
+            
+            try:
+                # Calcular valores Q actuales
+                features = self.perception(states)
+                q_values = self.executive(features)
+                q_values = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+                
+                # Calcular valores Q objetivo
+                with torch.no_grad():
+                    next_features = self.perception(next_states)
+                    next_q_values = self.executive(next_features)
+                    max_next_q = next_q_values.max(1)[0]
+                    q_targets = rewards + (1 - dones) * self.gamma * max_next_q
+                
+                # Calcular pérdida de valor Q
+                q_loss = nn.MSELoss()(q_values, q_targets)
+                
+                # Calcular pérdida de predicción
+                pred_loss = self.prediction.compute_loss(features, next_features)
+                
+                # Calcular pérdida de curiosidad
+                curiosity_loss = self.curiosity.compute_loss(states, actions, next_states)
+            except RuntimeError as e:
+                if "size mismatch" in str(e) or "dimension" in str(e) or "shape" in str(e):
+                    print(f"Error de dimensiones detectado: {e}")
+                    print("Intentando adaptar dimensiones entre módulos...")
+                    
+                    # Verificar dimensiones entre perception y executive
+                    perception_output = self.perception.output_shape
+                    executive_input = self.executive.input_shape
+                    
+                    if perception_output != executive_input:
+                        print(f"Inconsistencia detectada: Salida de perception {perception_output} ≠ Entrada de executive {executive_input}")
+                        # Intentar adaptar módulos
+                        if hasattr(self.executive, 'update_input_shape'):
+                            print(f"Adaptando dimensiones de entrada del módulo executive...")
+                            self.executive.update_input_shape(perception_output)
+                    
+                    # Verificar dimensiones entre perception y prediction
+                    prediction_input = self.prediction.input_shape
+                    if perception_output != prediction_input:
+                        print(f"Inconsistencia detectada: Salida de perception {perception_output} ≠ Entrada de prediction {prediction_input}")
+                        # Intentar adaptar módulos
+                        if hasattr(self.prediction, 'update_input_shape'):
+                            print(f"Adaptando dimensiones de entrada del módulo prediction...")
+                            self.prediction.update_input_shape(perception_output)
+                    
+                    # Reintentar después de la adaptación
+                    print("Reintentando paso de entrenamiento después de adaptar dimensiones...")
+                    return self.train_step()
+                else:
+                    # Otro tipo de error de Runtime
+                    print(f"Error de ejecución durante el entrenamiento: {e}")
+                    return 0.0
+            
+            # Calcular pérdida total
+            total_loss = q_loss + 0.2 * pred_loss + 0.1 * curiosity_loss
+            
+            # Optimización
+            self.optimizer.zero_grad()
+            total_loss.backward()
+            
+            # Recortar gradientes para estabilidad
+            torch.nn.utils.clip_grad_norm_(self.parameters(), 10.0)
+            
+            self.optimizer.step()
+            
+            # Actualizar capas dinámicas (crecimiento/poda)
+            if self.episodes_trained % 10 == 0:
+                self.adapt_dynamic_layers()
+            
+            # Actualizar estadísticas
+            self.losses.append(total_loss.item())
+            
+            return total_loss.item()
+            
+        except Exception as e:
+            print(f"Error al realizar paso de entrenamiento: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0.0
+    
+    def adapt_dynamic_layers(self):
+        """
+        Adapta las capas dinámicas en todos los módulos cognitivos.
+        """
+        # Adaptar percepción
+        if hasattr(self.perception, 'adapt'):
+            self.perception.adapt()
         
-        # Convertir a tensores
-        states = torch.FloatTensor(states).to(self.device)
-        actions = torch.LongTensor(actions).to(self.device)
-        rewards = torch.FloatTensor(rewards).to(self.device)
-        next_states = torch.FloatTensor(next_states).to(self.device)
-        dones = torch.FloatTensor(dones).to(self.device)
+        # Adaptar predicción
+        if hasattr(self.prediction, 'adapt'):
+            self.prediction.adapt()
         
-        # Calcular valores Q actuales
-        features = self.perception(states)
-        q_values = self.executive(features)
-        q_values = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+        # Adaptar ejecutivo
+        if hasattr(self.executive, 'adapt'):
+            self.executive.adapt()
         
-        # Calcular valores Q objetivo
-        with torch.no_grad():
-            next_features = self.perception(next_states)
-            next_q_values = self.executive(next_features)
-            max_next_q = next_q_values.max(1)[0]
-            q_targets = rewards + (1 - dones) * self.gamma * max_next_q
-        
-        # Calcular pérdida de valor Q
-        q_loss = nn.MSELoss()(q_values, q_targets)
-        
-        # Calcular pérdida de predicción
-        pred_loss = self.prediction.compute_loss(features, next_features)
-        
-        # Calcular pérdida de curiosidad
-        curiosity_loss = self.curiosity.compute_loss(states, actions, next_states)
-        
-        # Pérdida total
-        total_loss = q_loss + 0.5 * pred_loss + 0.1 * curiosity_loss
-        
-        # Optimización
-        self.optimizer.zero_grad()
-        total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)  # Recorte de gradiente
-        self.optimizer.step()
-        
-        return total_loss.item()
+        # Verificar y corregir inconsistencias dimensionales
+        self.check_module_dimensions()
     
     def evaluate_episode(self, env: BaseEnvironment, render: bool = False) -> float:
         """
@@ -301,86 +375,130 @@ class NeurEvoAgent:
             for param in module.parameters():
                 yield param
     
-    def save(self, filename: str) -> None:
+    def check_module_dimensions(self):
         """
-        Guarda el estado del agente en disco.
+        Verifica y corrige inconsistencias dimensionales entre los módulos.
+        """
+        try:
+            # Comprobar dimensiones de percepción <-> predicción
+            perception_output = self.perception.output_shape
+            prediction_input = self.prediction.input_shape
+            
+            if perception_output != prediction_input:
+                print(f"Corrigiendo inconsistencia: perception.output_shape={perception_output} → prediction.input_shape={prediction_input}")
+                if hasattr(self.prediction, 'update_input_shape'):
+                    self.prediction.update_input_shape(perception_output)
+            
+            # Comprobar dimensiones de percepción <-> ejecutivo
+            executive_input = self.executive.input_shape
+            
+            if perception_output != executive_input:
+                print(f"Corrigiendo inconsistencia: perception.output_shape={perception_output} → executive.input_shape={executive_input}")
+                if hasattr(self.executive, 'update_input_shape'):
+                    self.executive.update_input_shape(perception_output)
+            
+            # Establecer conexiones entre módulos si no existen
+            if not self.perception in self.prediction.connected_modules["input"]:
+                self.prediction.connect_to_input(self.perception)
+                
+            if not self.perception in self.executive.connected_modules["input"]:
+                self.executive.connect_to_input(self.perception)
+                
+        except Exception as e:
+            print(f"Error al verificar dimensiones entre módulos: {e}")
+    
+    def save(self, filepath: str) -> None:
+        """
+        Guarda el modelo del agente en disco.
         
         Args:
-            filename: Ruta del archivo donde guardar el agente
+            filepath: Ruta donde guardar el modelo
         """
-        # Crear directorio si no existe
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        
-        # Guardar estado
+        # Recopilar información del estado actual para el guardado
         state = {
-            # Módulos
-            'perception': self.perception.state_dict(),
-            'prediction': self.prediction.state_dict(),
-            'executive': self.executive.state_dict(),
-            'curiosity': self.curiosity.state_dict(),
-            
-            # Optimizador
-            'optimizer': self.optimizer.state_dict(),
-            
-            # Otros atributos
-            'epsilon': self.epsilon,
+            'perception_state': self.perception.state_dict(),
+            'prediction_state': self.prediction.state_dict(),
+            'executive_state': self.executive.state_dict(),
+            'curiosity_state': self.curiosity.state_dict(),
+            'optimizer_state': self.optimizer.state_dict(),
+            'observation_shape': self.observation_shape,
+            'action_size': self.action_size,
             'episodes_trained': self.episodes_trained,
-            'losses': self.losses,
-            'rewards': self.rewards,
-            'q_values': self.q_values,
-            
-            # Componentes adicionales
-            'skill_library': self.skill_library.skills,
-            'meta_controller': {
-                'curriculum_level': self.meta_controller.curriculum_level,
-                'strategy': self.meta_controller.current_strategy
+            'epsilon': self.epsilon,
+            'gamma': self.gamma,
+            'module_dimensions': {
+                'perception_output': self.perception.output_shape,
+                'prediction_input': self.prediction.input_shape,
+                'executive_input': self.executive.input_shape
             }
         }
         
-        torch.save(state, filename)
-        print(f"Agente guardado en {filename}")
+        # Guardar en disco
+        try:
+            torch.save(state, filepath)
+            print(f"Modelo guardado en {filepath}")
+        except Exception as e:
+            print(f"Error al guardar el modelo: {e}")
     
-    def load(self, filename: str) -> int:
+    def load(self, filepath: str) -> None:
         """
-        Carga el estado del agente desde disco.
+        Carga un modelo de agente desde disco.
         
         Args:
-            filename: Ruta del archivo desde donde cargar el agente
-            
-        Returns:
-            Número de episodios entrenados
+            filepath: Ruta desde donde cargar el modelo
         """
-        # Verificar que el archivo existe
-        if not os.path.exists(filename):
-            raise FileNotFoundError(f"No se encontró el archivo {filename}")
-        
-        # Cargar estado
-        state = torch.load(filename, map_location=self.device)
-        
-        # Cargar módulos
-        self.perception.load_state_dict(state['perception'])
-        self.prediction.load_state_dict(state['prediction'])
-        self.executive.load_state_dict(state['executive'])
-        self.curiosity.load_state_dict(state['curiosity'])
-        
-        # Cargar optimizador
-        self.optimizer.load_state_dict(state['optimizer'])
-        
-        # Cargar otros atributos
-        self.epsilon = state['epsilon']
-        self.episodes_trained = state['episodes_trained']
-        self.losses = state['losses']
-        self.rewards = state['rewards']
-        self.q_values = state['q_values']
-        
-        # Cargar biblioteca de habilidades
-        if 'skill_library' in state:
-            self.skill_library.skills = state['skill_library']
-        
-        # Cargar meta-controlador
-        if 'meta_controller' in state:
-            self.meta_controller.curriculum_level = state['meta_controller']['curriculum_level']
-            self.meta_controller.current_strategy = state['meta_controller']['strategy']
-        
-        print(f"Agente cargado desde {filename}")
-        return self.episodes_trained 
+        try:
+            # Cargar desde disco
+            checkpoint = torch.load(filepath, map_location=self.device)
+            
+            # Verificar si la forma de observación coincide
+            if checkpoint['observation_shape'] != self.observation_shape:
+                print(f"Advertencia: Forma de observación diferente. Modelo: {checkpoint['observation_shape']}, Actual: {self.observation_shape}")
+            
+            # Verificar si el tamaño de acción coincide
+            if checkpoint['action_size'] != self.action_size:
+                print(f"Advertencia: Tamaño de acción diferente. Modelo: {checkpoint['action_size']}, Actual: {self.action_size}")
+                raise ValueError("No se puede cargar un modelo con un tamaño de acción diferente")
+            
+            # Cargar estados de los módulos
+            self.perception.load_state_dict(checkpoint['perception_state'])
+            self.prediction.load_state_dict(checkpoint['prediction_state'])
+            self.executive.load_state_dict(checkpoint['executive_state'])
+            self.curiosity.load_state_dict(checkpoint['curiosity_state'])
+            
+            # Cargar estado del optimizador
+            self.optimizer.load_state_dict(checkpoint['optimizer_state'])
+            
+            # Restaurar variables de entrenamiento
+            self.episodes_trained = checkpoint.get('episodes_trained', 0)
+            self.epsilon = checkpoint.get('epsilon', self.epsilon)
+            self.gamma = checkpoint.get('gamma', self.gamma)
+            
+            # Verificar dimensiones
+            if 'module_dimensions' in checkpoint:
+                saved_dims = checkpoint['module_dimensions']
+                current_dims = {
+                    'perception_output': self.perception.output_shape,
+                    'prediction_input': self.prediction.input_shape,
+                    'executive_input': self.executive.input_shape
+                }
+                
+                # Verificar inconsistencias
+                if saved_dims != current_dims:
+                    print("Detectadas inconsistencias dimensionales entre el modelo guardado y el actual:")
+                    for key in saved_dims:
+                        if key in current_dims and saved_dims[key] != current_dims[key]:
+                            print(f"  - {key}: guardado={saved_dims[key]}, actual={current_dims[key]}")
+                    
+                    # Corregir inconsistencias
+                    self.check_module_dimensions()
+            else:
+                # Si no hay información de dimensiones, verificar de todos modos
+                self.check_module_dimensions()
+            
+            print(f"Modelo cargado desde {filepath}")
+            
+        except Exception as e:
+            print(f"Error al cargar el modelo: {e}")
+            import traceback
+            traceback.print_exc() 

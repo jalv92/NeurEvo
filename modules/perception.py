@@ -68,103 +68,174 @@ class PerceptionModule(BaseModule):
             # Para entradas unidimensionales
             flattened_size = input_shape[0]
         
-        # Construir capas completamente conectadas
-        self.fc_layers = nn.ModuleList()
+        # Construir capas ocultas
+        self.hidden_layers = hidden_layers
         layer_sizes = [flattened_size] + hidden_layers
         
+        self.layers = nn.ModuleList()
+        self.use_dynamic_layers = use_dynamic_layers
+        
+        # Para cada capa oculta
         for i in range(len(layer_sizes) - 1):
             if use_dynamic_layers:
                 # Usar capas dinámicas
                 layer = DynamicLayer(
                     in_features=layer_sizes[i],
                     out_features=layer_sizes[i+1],
+                    bias=True,
                     activation=activation,
                     use_batch_norm=use_batch_norm,
                     dropout_rate=dropout_rate,
-                    device=self.device
+                    device=device
                 )
+                
+                # Registrar listener para cambios de dimensión
+                if i > 0:  # No es necesario para la primera capa
+                    prev_layer = self.layers[-1]
+                    if isinstance(prev_layer, DynamicLayer):
+                        # Cuando la capa anterior cambia, actualizar dimensiones de entrada de esta capa
+                        prev_layer.register_dimension_listener(
+                            lambda in_f, out_f, layer=layer: layer.update_input_size(out_f)
+                        )
+                    
+                self.layers.append(layer)
             else:
                 # Usar capas estándar
-                layer = nn.Linear(layer_sizes[i], layer_sizes[i+1])
-                self.fc_layers.append(layer)
-                
-                # Añadir normalización por lotes si está habilitada
+                self.layers.append(nn.Linear(layer_sizes[i], layer_sizes[i+1]))
                 if use_batch_norm:
-                    self.fc_layers.append(nn.BatchNorm1d(layer_sizes[i+1]))
+                    self.layers.append(nn.BatchNorm1d(layer_sizes[i+1]))
                 
-                # Añadir activación
-                if activation.lower() == 'relu':
-                    self.fc_layers.append(nn.ReLU())
-                elif activation.lower() == 'tanh':
-                    self.fc_layers.append(nn.Tanh())
-                elif activation.lower() == 'sigmoid':
-                    self.fc_layers.append(nn.Sigmoid())
-                elif activation.lower() == 'leaky_relu':
-                    self.fc_layers.append(nn.LeakyReLU())
+                if activation == 'relu':
+                    self.layers.append(nn.ReLU())
+                elif activation == 'tanh':
+                    self.layers.append(nn.Tanh())
+                elif activation == 'sigmoid':
+                    self.layers.append(nn.Sigmoid())
+                elif activation == 'leaky_relu':
+                    self.layers.append(nn.LeakyReLU())
                 
-                # Añadir dropout si está habilitado
                 if dropout_rate > 0:
-                    self.fc_layers.append(nn.Dropout(dropout_rate))
-            
-            # Si es una capa dinámica, añadirla directamente (ya incluye activación, etc.)
-            if use_dynamic_layers:
-                self.fc_layers.append(layer)
-        
-        # Capa de salida
-        self.output_layer = nn.Linear(hidden_layers[-1], hidden_layers[-1])
-        
-        # Mover al dispositivo correcto
-        self.to(self.device)
+                    self.layers.append(nn.Dropout(dropout_rate))
     
     def _get_conv_output_size(self) -> int:
         """
         Calcula el tamaño de salida de las capas convolucionales.
         
         Returns:
-            Tamaño de la salida aplanada
+            Tamaño del tensor aplanado después de las convoluciones
         """
-        # Crear tensor de entrada de prueba
-        x = torch.zeros(1, *self.input_shape).to(self.device)
+        # Crear un tensor de entrada dummy
+        dummy_input = torch.zeros((1,) + self.input_shape)
         
-        # Pasar por capas convolucionales
+        # Pasarlo por las capas convolucionales
+        x = dummy_input
         for layer in self.conv_layers:
             x = layer(x)
         
-        # Devolver tamaño aplanado
+        # Devolver el tamaño total
         return int(np.prod(x.shape[1:]))
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Realiza la pasada hacia adelante del módulo.
+        Realiza la pasada hacia adelante.
         
         Args:
             x: Tensor de entrada [batch_size, *input_shape]
             
         Returns:
-            Tensor de características extraídas [batch_size, output_size]
+            Tensor de características [batch_size, last_hidden_size]
         """
-        # Procesar con capas convolucionales si es necesario
+        batch_size = x.shape[0]
+        
+        # Preprocesar entrada si es necesario
         if self.is_conv:
-            for layer in self.conv_layers:
-                x = layer(x)
+            # Aplicar capas convolucionales
+            if len(self.input_shape) == 3:  # [C, H, W]
+                for layer in self.conv_layers:
+                    x = layer(x)
             
-            # Aplanar para capas completamente conectadas
-            x = x.view(x.size(0), -1)
+            # Aplanar la salida
+            x = x.view(batch_size, -1)
         
-        # Procesar con capas completamente conectadas
-        for layer in self.fc_layers:
-            x = layer(x)
-        
-        # Capa de salida
-        x = self.output_layer(x)
+        # Aplicar capas ocultas
+        if self.use_dynamic_layers:
+            for layer in self.layers:
+                x = layer(x)
+        else:
+            for layer in self.layers:
+                x = layer(x)
         
         return x
     
+    def adapt_to_input_shape(self) -> None:
+        """
+        Adapta el módulo a cambios en la forma de entrada.
+        """
+        # Recalcular flattened_size si es necesario
+        if self.is_conv:
+            if len(self.input_shape) == 3:  # [C, H, W]
+                # Es posible que necesitemos reconstruir las capas convolucionales
+                in_channels = self.input_shape[0]
+                
+                # Recrear las capas convolucionales
+                self.conv_layers = nn.ModuleList()
+                self.conv_layers.append(nn.Conv2d(in_channels, 32, kernel_size=8, stride=4))
+                self.conv_layers.append(nn.ReLU())
+                self.conv_layers.append(nn.Conv2d(32, 64, kernel_size=4, stride=2))
+                self.conv_layers.append(nn.ReLU())
+                self.conv_layers.append(nn.Conv2d(64, 64, kernel_size=3, stride=1))
+                self.conv_layers.append(nn.ReLU())
+                
+                # Recalcular tamaño de salida
+                flattened_size = self._get_conv_output_size()
+            else:
+                # Simplemente recalcular el tamaño aplanado
+                flattened_size = np.prod(self.input_shape)
+        else:
+            # Para entradas unidimensionales
+            flattened_size = self.input_shape[0]
+        
+        # Actualizar la primera capa
+        if self.use_dynamic_layers and len(self.layers) > 0:
+            first_layer = self.layers[0]
+            if isinstance(first_layer, DynamicLayer) and first_layer.in_features != flattened_size:
+                first_layer.update_input_size(flattened_size)
+    
+    def summary(self) -> Dict[str, Any]:
+        """
+        Genera un resumen del módulo con sus principales características.
+        
+        Returns:
+            Diccionario con información del módulo
+        """
+        base_summary = super().summary()
+        
+        additional_info = {
+            "is_conv": self.is_conv,
+            "hidden_layers": self.hidden_layers,
+            "use_dynamic_layers": self.use_dynamic_layers,
+            "num_parameters": sum(p.numel() for p in self.parameters() if p.requires_grad)
+        }
+        
+        # Añadir información de capas dinámicas si se usan
+        if self.use_dynamic_layers:
+            dynamic_info = {}
+            for i, layer in enumerate(self.layers):
+                if isinstance(layer, DynamicLayer):
+                    dynamic_info[f"layer_{i}"] = {
+                        "in_features": layer.in_features,
+                        "out_features": layer.out_features,
+                        "active_connections": layer.connectivity_mask.sum().item()
+                    }
+            additional_info["dynamic_layers"] = dynamic_info
+        
+        return {**base_summary, **additional_info}
+
     def adapt(self):
         """
         Adapta las capas dinámicas del módulo.
         """
-        for layer in self.fc_layers:
+        for layer in self.layers:
             if isinstance(layer, DynamicLayer):
                 layer.adapt_connectivity()
     
