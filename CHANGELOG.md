@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.1.0] - Fecha: 2024-XX-XX
+## [1.1.0] - Fecha: 2024-03-08
 
 ### Restructuración del Framework
 
@@ -25,6 +25,11 @@
 - Creados adaptadores para Gym/Gymnasium y para entornos personalizados
 - Añadido sistema de registro automático de entornos integrados
 
+#### Solución de Problemas de Importación
+- Corregidos problemas de importación con Pylance/VS Code
+- Implementada estructura de importación robusta para evitar errores circulares
+- Añadidos stubs temporales para permitir importaciones parciales durante desarrollo
+
 #### Documentación Interna
 - Añadidos docstrings completos para todas las nuevas clases y funciones
 - Actualizados comentarios existentes para reflejar la nueva estructura
@@ -34,6 +39,7 @@
 - Usar `pip install -e .` para instalar el paquete en modo desarrollo
 - Actualizar importaciones para utilizar la nueva estructura de paquetes
 - Migrar gradualmente a la nueva API unificada (`BrainInterface`)
+- Utilizar los adaptadores de entorno para integrar nuevos entornos
 
 ---
 

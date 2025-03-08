@@ -21,11 +21,15 @@ NeurEvo is a brain-inspired reinforcement learning framework featuring dynamic n
 - **Unified Interface**: Simple, consistent API for all reinforcement learning tasks
 - **Environment Adapters**: Built-in support for Gym, Gymnasium, and custom environments
 - **Component Registry**: Extensible architecture for adding custom components
+- **Project Integration**: Easy to import and use in any Python project
 
 ## Installation
 
 ```bash
-# Clone the repository
+# From PyPI (recommended)
+pip install neurevo
+
+# or clone the repository for development
 git clone https://github.com/yourusername/neurevo.git
 cd neurevo
 
@@ -57,6 +61,57 @@ print(f"Average reward: {average_reward}")
 
 # Save the trained agent
 brain.save("cartpole_agent.pt")
+```
+
+## Using NeurEvo in Your Projects
+
+NeurEvo now features a complete package structure with proper imports, making it easy to incorporate into any Python project.
+
+### Simple Import
+
+```python
+# Import the main package
+import neurevo
+
+# Create a brain interface - the main entry point
+brain = neurevo.create_brain()
+```
+
+### Specific Imports
+
+```python
+# Import specific components
+from neurevo import create_brain
+from neurevo.core import NeurEvoAgent, BaseEnvironment
+from neurevo.config import NeurEvoConfig
+from neurevo.environments import create_custom_environment
+```
+
+### Project Integration
+
+1. Install NeurEvo in your Python environment
+2. Import the components you need
+3. Use the unified API to create and manage agents
+
+```python
+# In your project
+import neurevo
+
+def train_agent_for_my_project():
+    # Create brain interface
+    brain = neurevo.create_brain({
+        "learning_rate": 0.001,
+        "hidden_layers": [256, 128]
+    })
+    
+    # Register your custom environment
+    brain.register_environment("MyProjectEnv", my_environment_adapter)
+    
+    # Create and train agent
+    agent = brain.create_for_environment("MyProjectEnv")
+    results = brain.train(episodes=1000)
+    
+    return agent, results
 ```
 
 ## Adapting to Different Environments
@@ -188,6 +243,28 @@ from neurevo.utils.visualization import visualize_network_growth
 
 # After training
 history = brain.visualize_network_growth()
+```
+
+## Troubleshooting
+
+### Import Issues
+
+If you encounter import issues:
+
+1. Ensure you've installed the package correctly with `pip install -e .`
+2. Try restarting your Python interpreter or IDE
+3. Verify your Python path includes the neurevo package
+
+### Testing Imports
+
+You can test if neurevo is correctly installed and importable with:
+
+```python
+import neurevo
+print(f"NeurEvo version: {neurevo.__version__}")
+
+# Test creating a brain
+brain = neurevo.create_brain()
 ```
 
 ## Contributing
