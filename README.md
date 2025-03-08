@@ -1,7 +1,7 @@
 # NeurEvo
 
 <p align="center">
-  <img src="docs/images/neurevo_logo.png" alt="NeurEvo Logo" width="200"/>
+  🧠
 </p>
 
 NeurEvo is a brain-inspired reinforcement learning framework featuring dynamic neural networks that grow and prune connections autonomously. With Hebbian learning, episodic memory, intrinsic curiosity, and skill transfer capabilities, NeurEvo adapts to virtually any reinforcement learning challenge.
@@ -18,7 +18,9 @@ NeurEvo is a brain-inspired reinforcement learning framework featuring dynamic n
 - **Intrinsic Curiosity**: Self-motivated exploration of novel or uncertain states
 - **Skill Transfer**: Reuse knowledge between different tasks and environments
 - **Meta-Learning**: Automatic hyperparameter optimization during training
-- **Modular Design**: Easy to adapt to any reinforcement learning problem
+- **Unified Interface**: Simple, consistent API for all reinforcement learning tasks
+- **Environment Adapters**: Built-in support for Gym, Gymnasium, and custom environments
+- **Component Registry**: Extensible architecture for adding custom components
 
 ## Installation
 
@@ -27,146 +29,104 @@ NeurEvo is a brain-inspired reinforcement learning framework featuring dynamic n
 git clone https://github.com/yourusername/neurevo.git
 cd neurevo
 
-# Install with pip
+# Install in development mode
 pip install -e .
 
-# Or install dependencies
+# Or install dependencies manually
 pip install -r requirements.txt
 ```
 
 ## Quick Start
 
 ```python
-from neurevo.core.agent import NeurEvoAgent
-from neurevo.config.config import NeurEvoConfig
-import gym
+# Import the framework
+import neurevo
 
-# Create environment
-env = gym.make('CartPole-v1')
-state_size = env.observation_space.shape[0]
-action_size = env.action_space.n
+# Create a brain with default configuration
+brain = neurevo.create_brain()
 
-# Create agent with default configuration
-config = NeurEvoConfig()
-agent = NeurEvoAgent(state_size, action_size, config)
+# Create an agent for a specific environment
+agent = brain.create_for_environment("CartPole-v1")
 
-# Training loop
-num_episodes = 500
-for episode in range(num_episodes):
-    state = env.reset()
-    done = False
-    total_reward = 0
-    
-    while not done:
-        # Get action from agent
-        action = agent.act(state)
-        
-        # Take step in environment
-        next_state, reward, done, _ = env.step(action)
-        
-        # Let agent process experience
-        agent.remember(state, action, reward, next_state, done)
-        
-        # Train agent periodically
-        if episode > 10:  # Start training after collecting some experiences
-            agent.train()
-            
-        state = next_state
-        total_reward += reward
-    
-    # Update agent's learning strategy
-    agent.update_meta_learning(env, total_reward, 1 if total_reward > 195 else 0)
-    
-    # Decay exploration rate
-    agent.decay_epsilon()
-    
-    if episode % 10 == 0:
-        print(f"Episode {episode}, Score: {total_reward}, Epsilon: {agent.epsilon:.4f}")
+# Train the agent
+results = brain.train(episodes=500)
+
+# Evaluate the agent
+average_reward = brain.evaluate(episodes=10)
+print(f"Average reward: {average_reward}")
 
 # Save the trained agent
-agent.save("cartpole_agent.pt")
+brain.save("cartpole_agent.pt")
 ```
 
 ## Adapting to Different Environments
 
-NeurEvo can be used with virtually any reinforcement learning environment. Here's how to integrate it with different types of environments:
+NeurEvo can be used with virtually any reinforcement learning environment using our adapter system:
 
 ### Custom Environment Integration
 
-Any environment that provides the standard RL interface (reset, step) can work with NeurEvo:
-
 ```python
-class MyCustomEnvironment:
-    def __init__(self):
-        self.state_size = 8  # Size of state representation
-        self.action_size = 4  # Number of possible actions
-        # Initialize environment state
-        
-    def reset(self):
-        # Reset environment to initial state
-        return initial_state
-        
-    def step(self, action):
-        # Execute action and return results
-        next_state = ...
-        reward = ...
-        done = ...
-        return next_state, reward, done
+from neurevo import create_brain
+from neurevo.environments.custom_adapter import create_custom_environment
 
-# Create agent for this environment
-env = MyCustomEnvironment()
-agent = NeurEvoAgent(env.state_size, env.action_size)
+# Define reset and step functions for your environment
+def reset_fn():
+    # Reset your environment and return initial state
+    return initial_state
+
+def step_fn(action):
+    # Execute action and return results
+    return next_state, reward, done, info
+
+# Create and register custom environment
+brain = create_brain()
+brain.register_environment(
+    "MyEnvironment",
+    create_custom_environment,
+    reset_fn=reset_fn,
+    step_fn=step_fn,
+    observation_shape=(8,),
+    action_size=4
+)
+
+# Use your custom environment
+agent = brain.create_for_environment("MyEnvironment")
+brain.train(episodes=500)
 ```
 
-### Adapting PyTorch Models
-
-You can customize the neural architecture for specific domains:
+### Using with Gym/Gymnasium Environments
 
 ```python
-from neurevo.modules.dynamic_layer import DynamicLayer
-import torch.nn as nn
+from neurevo import create_brain
 
-# Custom perception module for image-based states
-class ImagePerceptionModule(nn.Module):
-    def __init__(self, input_channels, output_size):
-        super().__init__()
-        self.conv_layers = nn.Sequential(
-            nn.Conv2d(input_channels, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.Flatten()
-        )
-        self.dynamic_layer = DynamicLayer(3136, output_size)  # 3136 = flattened conv output
-        
-    def forward(self, x):
-        conv_features = self.conv_layers(x)
-        return self.dynamic_layer(conv_features)
+# Create brain interface
+brain = create_brain()
 
-# Then integrate with agent:
-agent.modules['perception'] = ImagePerceptionModule(4, 64).to(agent.device)
+# Use any Gym environment
+agent = brain.create_for_environment("LunarLander-v2")
+
+# Train the agent
+brain.train(agent_id=agent, episodes=1000)
 ```
 
-### Using with Gym Environments
-
-NeurEvo works seamlessly with OpenAI Gym:
+### Customizing Neural Architecture
 
 ```python
-import gym
-from neurevo import create_agent, train_agent
+from neurevo import create_brain
+from neurevo.config import NeurEvoConfig
 
-# Create environment
-env = gym.make('LunarLander-v2')
-state_size = env.observation_space.shape[0]
-action_size = env.action_space.n
+# Create custom configuration
+config = {
+    "hidden_layers": [256, 128, 64],
+    "learning_rate": 0.0005,
+    "batch_size": 128,
+    "curiosity_weight": 0.2
+}
 
-# Create agent
-agent = create_agent(state_size, action_size)
-
-# Train agent
-train_agent(agent, env, num_episodes=1000, save_path="lunar_lander_agent.pt")
+# Create brain with custom configuration
+brain = create_brain(config)
+agent = brain.create_for_environment("MountainCar-v0")
+brain.train(episodes=1000)
 ```
 
 ## Project Structure
@@ -175,13 +135,14 @@ train_agent(agent, env, num_episodes=1000, save_path="lunar_lander_agent.pt")
 neurevo/
 │
 ├── __init__.py                # Public API exports
-├── neurevo_main.py            # Main orchestrator
+├── brain.py                   # Unified interface
 │
 ├── config/                    # Configuration system
 ├── core/                      # Core agent implementation
 ├── modules/                   # Neural modules
 ├── memory/                    # Memory systems
 ├── learning/                  # Learning algorithms
+├── environments/              # Environment adapters
 ├── utils/                     # Utility functions
 │
 └── examples/                  # Example environments
@@ -193,23 +154,31 @@ neurevo/
 
 ```python
 # Train in simple environment
-agent = create_agent(state_size, action_size)
-train_agent(agent, simple_env, num_episodes=500)
+brain = create_brain()
+agent = brain.create_for_environment("CartPole-v1")
+brain.train(episodes=500)
 
-# Transfer to more complex environment
-complex_env = ComplexEnvironment()
-agent.transfer_knowledge(complex_env)
-train_agent(agent, complex_env, num_episodes=200)
+# Save skills
+brain.save_skills("cartpole_skills")
+
+# Create new agent for complex environment
+new_agent = brain.create_for_environment("BipedalWalker-v3")
+
+# Load skills from previous environment
+brain.load_skills("cartpole_skills")
+brain.train(episodes=200)  # Faster learning with transferred skills
 ```
 
 ### Customizing Intrinsic Motivation
 
 ```python
 # Adjust curiosity parameters
-config = NeurEvoConfig()
-config.CURIOSITY_WEIGHT = 0.2  # Stronger intrinsic motivation
-config.NOVELTY_THRESHOLD = 0.1  # More sensitive to novel states
-agent = create_agent(state_size, action_size, config)
+config = {
+    "curiosity_weight": 0.2,
+    "curiosity_type": "rnd",  # Options: "icm", "rnd", "disagreement"
+    "novelty_threshold": 0.1
+}
+brain = create_brain(config)
 ```
 
 ### Dynamic Network Visualization
@@ -218,7 +187,7 @@ agent = create_agent(state_size, action_size, config)
 from neurevo.utils.visualization import visualize_network_growth
 
 # After training
-history = visualize_network_growth(agent)
+history = brain.visualize_network_growth()
 ```
 
 ## Contributing
@@ -239,3 +208,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - Inspired by principles from neuroscience and cognitive science
 - Built with PyTorch and compatible with OpenAI Gym environments
+
+## Created BY
+- Javier Lora
