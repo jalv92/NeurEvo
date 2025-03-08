@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.1.0] - Fecha: 2024-XX-XX
+
+### Restructuración del Framework
+
+#### Nueva Estructura de Paquetes
+- Implementada estructura completa de paquetes con archivos `__init__.py` en todos los directorios
+- Creado archivo `setup.py` para permitir instalación en modo desarrollo
+- Reorganizados módulos para mejorar la estructura y la organización del código
+
+#### Nueva Interfaz Unificada
+- Implementada clase `BrainInterface` en `neurevo/brain.py` como punto de entrada principal
+- Creada función `create_brain()` para inicialización simplificada
+- Mejorada la API para facilitar la interacción con agentes y entornos
+
+#### Sistema de Registro de Componentes
+- Creado sistema de registro en `neurevo/utils/registry.py` para componentes dinámicos
+- Implementados mecanismos para registrar y recuperar componentes de forma flexible
+- Añadido soporte para registro con decoradores y categorías de componentes
+
+#### Adaptadores de Entorno
+- Creado nuevo subsistema de adaptadores de entorno en `neurevo/environments/`
+- Implementada clase base abstracta `EnvironmentAdapter` para todos los adaptadores
+- Creados adaptadores para Gym/Gymnasium y para entornos personalizados
+- Añadido sistema de registro automático de entornos integrados
+
+#### Documentación Interna
+- Añadidos docstrings completos para todas las nuevas clases y funciones
+- Actualizados comentarios existentes para reflejar la nueva estructura
+- Mejorada la documentación de la API pública y ejemplos de uso
+
+### Recomendaciones de Uso
+- Usar `pip install -e .` para instalar el paquete en modo desarrollo
+- Actualizar importaciones para utilizar la nueva estructura de paquetes
+- Migrar gradualmente a la nueva API unificada (`BrainInterface`)
+
+---
+
 ## [1.0.1] - Fecha: 2023-XX-XX
 
 ### Correcciones de Errores
