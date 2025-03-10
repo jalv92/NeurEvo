@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.2.0] - Fecha: 2025-03-10
+
+### Reorganización Estructural del Proyecto
+
+#### Eliminación de Estructura Duplicada
+- Eliminada estructura duplicada de directorios en la raíz del proyecto
+- Consolidados todos los módulos bajo el directorio principal `neurevo/`
+- Unificadas las importaciones para seguir convenciones estándar de Python
+
+#### Estructura Estándar de Paquete Python
+- Reorganizado el proyecto siguiendo las convenciones estándar de paquetes Python
+- Creados directorios `examples/` y `tests/` para mejor organización
+- Movidos archivos de ejemplo y prueba a sus respectivos directorios
+- Mantenidos sólo los archivos esenciales en la raíz del proyecto
+
+#### Mejora de Importaciones
+- Optimizado el sistema de importaciones para evitar conflictos
+- Mejorada la consistencia en las rutas de importación
+- Facilitada la instalación del paquete con pip
+
 ## [1.1.0] - Fecha: 2025-03-08
 
 ### Restructuración del Framework
