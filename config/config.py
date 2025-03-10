@@ -60,6 +60,15 @@ class NeurEvoConfig:
         if config:
             self.config.update(config)
     
+    def copy(self) -> 'NeurEvoConfig':
+        """
+        Crea una copia de la configuración.
+        
+        Returns:
+            Nueva instancia de NeurEvoConfig con los mismos valores
+        """
+        return NeurEvoConfig(self.config.copy())
+    
     def __getattr__(self, name):
         """
         Permite acceder a los parámetros de configuración como atributos.

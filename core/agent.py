@@ -26,6 +26,52 @@ class NeurEvoAgent:
     Agente principal del framework NeurEvo.
     Integra módulos cognitivos, memoria episódica y aprendizaje por refuerzo.
     """
+
+    def get_state_dict(self) -> Dict[str, Any]:
+        """
+        Obtiene un diccionario con el estado completo del agente.
+        
+        Returns:
+            Diccionario con el estado del agente
+        """
+        return {
+            "perception_state": self.perception.state_dict(),
+            "prediction_state": self.prediction.state_dict(),
+            "executive_state": self.executive.state_dict(),
+            "curiosity_state": self.curiosity.state_dict(),
+            "optimizer_state": self.optimizer.state_dict(),
+            "observation_shape": self.observation_shape,
+            "action_size": self.action_size,
+            "total_steps": getattr(self, "total_steps", 0),
+            "episodes_completed": getattr(self, "episodes_completed", 0),
+            "exploration_rate": getattr(self, "exploration_rate", 0.0)
+        }
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        """
+        Carga el estado del agente desde un diccionario.
+        
+        Args:
+            state_dict: Diccionario con el estado del agente
+        """
+        # Cargar estados de módulos
+        self.perception.load_state_dict(state_dict["perception_state"])
+        self.prediction.load_state_dict(state_dict["prediction_state"])
+        self.executive.load_state_dict(state_dict["executive_state"])
+        self.curiosity.load_state_dict(state_dict["curiosity_state"])
+        
+        # Cargar estado del optimizador
+        self.optimizer.load_state_dict(state_dict["optimizer_state"])
+        
+        # Cargar contadores y estadísticas
+        if "total_steps" in state_dict:
+            self.total_steps = state_dict["total_steps"]
+            
+        if "episodes_completed" in state_dict:
+            self.episodes_completed = state_dict["episodes_completed"]
+            
+        if "exploration_rate" in state_dict:
+            self.exploration_rate = state_dict["exploration_rate"]
     
     def __init__(self, observation_shape: Union[Tuple[int, ...], List[int]], 
                  action_size: int, device: torch.device = None, **kwargs):
